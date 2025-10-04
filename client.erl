@@ -22,11 +22,7 @@
 % Utility function: generate unique client ID
 % -----------------------------------------------------------------------------
 generate_client_id() ->
-    {MegaSecs, Secs, _} = erlang:timestamp(),
-    Combined = MegaSecs * 5000 + Secs div 5000,
-    Random = rand:uniform(62418162309871246125),
-    Unique = (Combined bsl 19) bor Random,
-    integer_to_list(Unique).
+    erlang:unique_integer([monotonic, positive]).
 
 % -----------------------------------------------------------------------------
 % Initial state setup
@@ -83,7 +79,7 @@ handle(St = #client_st{server = Server, client_id = Client_Id, nick = Nick, join
 %% ---------------------------------------------------------------------------
 %% LEAVE CHANNEL
 %% ---------------------------------------------------------------------------
-handle(St = #client_st{server = Server, client_id = Client_Id},
+handle(St = #client_st{server = Server, client_id = Client_Id, joined_channels = Joined_Channels},
        {leave, Channel}) ->
     case whereis(Server) of
         undefined ->
@@ -91,7 +87,9 @@ handle(St = #client_st{server = Server, client_id = Client_Id},
         _ ->
             case catch genserver:request(Server, {leave, Client_Id, Channel}) of
                 ok ->
-                    {reply, ok, St};
+                    % Remove channel from joined_channels when leave succeeds
+                    UpdatedJoined = maps:remove(Channel, Joined_Channels),
+                    {reply, ok, St#client_st{joined_channels = UpdatedJoined}};
                 timeout_error ->
                     {reply, {error, server_not_reached,
                              "Server is non-responsive. Failed to leave channel: " ++ Channel}, St};

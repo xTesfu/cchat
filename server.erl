@@ -106,11 +106,12 @@ handle_request(State, {doesChannelExist, Channel}) ->
 
 % Handle stop request:
 % - Stop all channel processes
-% - Keep state unchanged
+% - Clear channel and nick tables for clean shutdown
 handle_request(State, stop) ->
     maps:foreach(fun(_, Pid) -> genserver:stop(Pid) end,
                  maps:get("channels", State, #{})),
-    {reply, ok, State};
+    ClearedState = #{"channels" => #{}, "nicks" => #{}},
+    {reply, ok, ClearedState};
 
 % Handle unknown requests gracefully
 handle_request(State, _Other) ->
