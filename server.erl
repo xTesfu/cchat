@@ -41,14 +41,20 @@ stop(ServerName) ->
 % Handle join request:
 % - Ensure channel exists, creating it if necessary
 % - Forward join request to channel process
-% - Update state if successful
-handle_request(State, {join, ClientId, Channel, Pid}) ->
+% - If join successful:
+%     - Update state with the new nick
+handle_request(State, {join, ClientId, Nick, Channel, Pid}) ->
     Channels = maps:get("channels", State, #{}),
     Updated = ensure_channel(Channel, Channels),
     NewState = State#{"channels" => Updated},
     ChanPid = maps:get(Channel, Updated),
     case catch genserver:request(ChanPid, {join, ClientId, Pid}) of
-        ok              -> {reply, {ok, ChanPid}, NewState};
+        ok -> 
+            % Add the new nick to the nick table in the state
+            NickTable = maps:get("nicks", NewState, #{}),
+            UpdatedNickTable = maps:put(Nick, true, NickTable),
+            NewState2 = NewState#{"nicks" => UpdatedNickTable},
+            {reply, {ok, ChanPid}, NewState2};
         already_joined  -> {reply, already_joined, State};
         timeout_error   -> {reply, error, State};
         _               -> {reply, error, State}
@@ -85,7 +91,12 @@ handle_request(State, {change_nick, OldNick, NewNick}) ->
         true -> {reply, nick_taken, State}
     end;
 
-% Handle check for channel existence
+% Handle channel existence check:
+% - Retrieve the channels map from the state (default to empty if missing)
+% - Check if the given channel exists in the map
+% - Reply with:
+%     ok if the channel exists
+%     channel_doesnt_exist if not
 handle_request(State, {doesChannelExist, Channel}) ->
     Channels = maps:get("channels", State, #{}),
     case maps:is_key(Channel, Channels) of

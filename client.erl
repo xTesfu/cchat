@@ -57,14 +57,14 @@ initial_state(Nick, GUIAtom, ServerAtom) ->
 %% ---------------------------------------------------------------------------
 %% JOIN CHANNEL
 %% ---------------------------------------------------------------------------
-handle(St = #client_st{server = Server, client_id = Client_Id, joined_channels = Joined_Channels},
+handle(St = #client_st{server = Server, client_id = Client_Id, nick = Nick, joined_channels = Joined_Channels},
        {join, Channel}) ->
     case whereis(Server) of
         undefined ->
             {reply, {error, server_not_reached,
                      "Server cannot be reached. Failed to join channel: " ++ Channel}, St};
         ServerPid ->
-            case catch genserver:request(ServerPid, {join, Client_Id, Channel, self()}, 2000) of
+            case catch genserver:request(ServerPid, {join, Client_Id, Nick, Channel, self()}, 2000) of
                 {ok, ChannelRef} ->
                     {reply, ok,
                      St#client_st{joined_channels =
@@ -142,9 +142,22 @@ handle(St = #client_st{server = Server, nick = Nick, client_id = Client_Id,
     end;
 
 % This case is only relevant for the distinction assignment!
-% Change nick (no check, local only)
-handle(St, {nick, NewNick}) ->
-    {reply, ok, St#client_st{nick = NewNick}} ;
+handle(St = #client_st{server = Server, nick = OldNick}, {nick, NewNick}) ->
+    case whereis(Server) of
+        undefined ->
+            {reply, {error, server_not_reached, "Server cannot be reached. Failed to change nick"}, St};
+        ServerPid ->
+            case catch genserver:request(ServerPid, {change_nick, OldNick, NewNick}, 2000) of
+                ok ->
+                    {reply, ok, St#client_st{nick = NewNick}};
+                nick_taken ->
+                    {reply, {error, nick_taken, "Nickname already in use: " ++ NewNick}, St};
+                timeout_error ->
+                    {reply, {error, server_not_reached, "Server is non-responsive. Failed to change nick"}, St};
+                {error, Reason} ->
+                    {reply, {error, Reason, "Failed to change nick"}, St}
+            end
+    end;
 
 % ---------------------------------------------------------------------------
 % The cases below do not need to be changed...
