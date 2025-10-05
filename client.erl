@@ -53,6 +53,11 @@ initial_state(Nick, GUIAtom, ServerAtom) ->
 %% ---------------------------------------------------------------------------
 %% JOIN CHANNEL
 %% ---------------------------------------------------------------------------
+% Handle channel join request:
+% - Verify the server process exists
+% - Request to join the specified channel
+% - On success: update state with the new channel reference
+% - On failure: return error for timeout, already joined, or other reasons
 handle(St = #client_st{server = Server, client_id = Client_Id, nick = Nick, joined_channels = Joined_Channels},
        {join, Channel}) ->
     case whereis(Server) of
@@ -79,6 +84,9 @@ handle(St = #client_st{server = Server, client_id = Client_Id, nick = Nick, join
 %% ---------------------------------------------------------------------------
 %% LEAVE CHANNEL
 %% ---------------------------------------------------------------------------
+% Handle leave request:
+% - Check server availability
+% - Request channel leave and update state if successful
 handle(St = #client_st{server = Server, client_id = Client_Id, joined_channels = Joined_Channels},
        {leave, Channel}) ->
     case whereis(Server) of
@@ -104,6 +112,10 @@ handle(St = #client_st{server = Server, client_id = Client_Id, joined_channels =
 %% ---------------------------------------------------------------------------
 %% SEND MESSAGE TO CHANNEL
 %% ---------------------------------------------------------------------------
+% Handle message send request:
+% - Verify user has joined the target channel
+% - Forward message to the channel process
+% - Return ok on success, or an appropriate error if failed
 handle(St = #client_st{server = Server, nick = Nick, client_id = Client_Id,
                        joined_channels = Joined_Channels},
        {message_send, Channel, Msg}) ->
@@ -139,7 +151,13 @@ handle(St = #client_st{server = Server, nick = Nick, client_id = Client_Id,
             end
     end;
 
-% This case is only relevant for the distinction assignment!
+%% ---------------------------------------------------------------------------
+%% CHANGE NICKNAME
+%% ---------------------------------------------------------------------------
+% Handle nickname change:
+% - Check if server is reachable
+% - Send request to change old nickname to new nickname
+% - Update client state on success, return error on failure
 handle(St = #client_st{server = Server, nick = OldNick}, {nick, NewNick}) ->
     case whereis(Server) of
         undefined ->
@@ -171,9 +189,15 @@ handle(St = #client_st{gui = GUI}, {message_receive, Channel, Nick, Msg}) ->
     {reply, ok, St} ;
 
 % Quit client via GUI
-handle(St, quit) ->
-    % Any cleanup should happen here, but this is optional
-    {reply, ok, St} ;
+handle(St = #client_st{server = Server, client_id = Client_Id, joined_channels = Joined_Channels}, quit) ->
+    % Leave all joined channels
+    lists:foreach(
+        fun(Channel) ->
+            catch genserver:request(Server, {leave, Client_Id, Channel})
+        end,
+        maps:keys(Joined_Channels)
+    ),
+    {reply, ok, St#client_st{joined_channels = #{}}};
 
 % Catch-all for any unhandled requests
 handle(St, _) ->
