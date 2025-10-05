@@ -1,1 +1,3 @@
 *.beam
+lib/grm.erl
+lib/lex.erl
