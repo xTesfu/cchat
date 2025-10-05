@@ -1,15 +1,20 @@
 -module(client).
 -export([handle/2, initial_state/3]).
 
-% -----------------------------------------------------------------------------
-% Record definition for client state
-% -----------------------------------------------------------------------------
+%%====================================================================
+%% Client State Definition
+%%====================================================================
+
+%---------------------------------------------------------------------
+% Record: client_st
+%
 % Fields:
-%   gui              - atom of the GUI process
-%   nick             - nickname/username of the client
-%   server           - atom of the chat server
-%   client_id        - unique id of the client
-%   joined_channels  - map of joined channels and their PIDs
+%   gui              - Atom of the GUI process.
+%   nick             - Nickname/username of the client.
+%   server           - Atom name of the chat server.
+%   client_id        - Unique ID for the client.
+%   joined_channels  - Map of joined channels and their PIDs.
+%---------------------------------------------------------------------
 -record(client_st, {
     gui,
     nick,
@@ -18,21 +23,32 @@
     joined_channels
 }).
 
-% -----------------------------------------------------------------------------
-% Utility function: generate unique client ID
-% -----------------------------------------------------------------------------
+%%====================================================================
+%% Utility Functions
+%%====================================================================
+
+%---------------------------------------------------------------------
+% generate_client_id/0
+%
+% Generate a unique integer ID for each client.
+% - Uses a monotonic, positive integer for uniqueness.
+%---------------------------------------------------------------------
 generate_client_id() ->
     erlang:unique_integer([monotonic, positive]).
 
-% -----------------------------------------------------------------------------
-% Initial state setup
-% -----------------------------------------------------------------------------
-% Called from GUI to create a new client state record.
-% - Nick: initial nickname
-% - GUIAtom: GUI process atom
-% - ServerAtom: chat server atom
-% Returns: #client_st{} record
-% -----------------------------------------------------------------------------
+%%====================================================================
+%% Initialization
+%%====================================================================
+
+%---------------------------------------------------------------------
+% initial_state/3
+%
+% Initialize a new client state record.
+% - Nick: Initial nickname for the client.
+% - GUIAtom: Atom name of the GUI process.
+% - ServerAtom: Atom name of the chat server.
+% Returns: #client_st{} record with default joined_channels = #{}.
+%---------------------------------------------------------------------
 initial_state(Nick, GUIAtom, ServerAtom) ->
     #client_st{
         gui = GUIAtom,
@@ -42,22 +58,19 @@ initial_state(Nick, GUIAtom, ServerAtom) ->
         joined_channels = #{}
     }.
 
-% -----------------------------------------------------------------------------
-% handle/2
-% Handles requests coming from the GUI.
-% - St: current client state
-% - Request: data from GUI
-% Must return {reply, Data, NewState}.
-% -----------------------------------------------------------------------------
+%%====================================================================
+%% Client Request Handling (Main Loop)
+%%====================================================================
 
-%% ---------------------------------------------------------------------------
-%% JOIN CHANNEL
-%% ---------------------------------------------------------------------------
-% Handle channel join request:
-% - Verify the server process exists
-% - Request to join the specified channel
-% - On success: update state with the new channel reference
-% - On failure: return error for timeout, already joined, or other reasons
+%---------------------------------------------------------------------
+% handle/2 - {join, Channel}
+%
+% Handle channel join request.
+% - Checks if the server process is available.
+% - Requests to join the specified channel.
+% - On success: updates joined_channels with the channel reference.
+% - On failure: returns an error for timeout, already joined, or server issues.
+%---------------------------------------------------------------------
 handle(St = #client_st{server = Server, client_id = Client_Id, nick = Nick, joined_channels = Joined_Channels},
        {join, Channel}) ->
     case whereis(Server) of
@@ -81,21 +94,22 @@ handle(St = #client_st{server = Server, client_id = Client_Id, nick = Nick, join
             end
     end;
 
-%% ---------------------------------------------------------------------------
-%% LEAVE CHANNEL
-%% ---------------------------------------------------------------------------
-% Handle leave request:
-% - Check server availability
-% - Request channel leave and update state if successful
+%---------------------------------------------------------------------
+% handle/2 - {leave, Channel}
+%
+% Handle leave request.
+% - Checks if the server is reachable.
+% - Sends a leave request to the server.
+% - On success: removes the channel from joined_channels.
+%---------------------------------------------------------------------
 handle(St = #client_st{server = Server, client_id = Client_Id, joined_channels = Joined_Channels},
        {leave, Channel}) ->
     case whereis(Server) of
         undefined ->
-            {reply, ok, St};  % nothing to do if server is gone
+            {reply, ok, St};  % Nothing to do if server is unavailable
         _ ->
             case catch genserver:request(Server, {leave, Client_Id, Channel}) of
                 ok ->
-                    % Remove channel from joined_channels when leave succeeds
                     UpdatedJoined = maps:remove(Channel, Joined_Channels),
                     {reply, ok, St#client_st{joined_channels = UpdatedJoined}};
                 timeout_error ->
@@ -109,13 +123,14 @@ handle(St = #client_st{server = Server, client_id = Client_Id, joined_channels =
             end
     end;
 
-%% ---------------------------------------------------------------------------
-%% SEND MESSAGE TO CHANNEL
-%% ---------------------------------------------------------------------------
-% Handle message send request:
-% - Verify user has joined the target channel
-% - Forward message to the channel process
-% - Return ok on success, or an appropriate error if failed
+%---------------------------------------------------------------------
+% handle/2 - {message_send, Channel, Msg}
+%
+% Handle message send request.
+% - Verifies that the client has joined the target channel.
+% - Sends the message via the corresponding channel process.
+% - Returns ok on success, or an appropriate error otherwise.
+%---------------------------------------------------------------------
 handle(St = #client_st{server = Server, nick = Nick, client_id = Client_Id,
                        joined_channels = Joined_Channels},
        {message_send, Channel, Msg}) ->
@@ -151,13 +166,14 @@ handle(St = #client_st{server = Server, nick = Nick, client_id = Client_Id,
             end
     end;
 
-%% ---------------------------------------------------------------------------
-%% CHANGE NICKNAME
-%% ---------------------------------------------------------------------------
-% Handle nickname change:
-% - Check if server is reachable
-% - Send request to change old nickname to new nickname
-% - Update client state on success, return error on failure
+%---------------------------------------------------------------------
+% handle/2 - {nick, NewNick}
+%
+% Handle nickname change request.
+% - Checks if the server is reachable.
+% - Requests the server to update nickname mapping.
+% - Updates local client state on success.
+%---------------------------------------------------------------------
 handle(St = #client_st{server = Server, nick = OldNick}, {nick, NewNick}) ->
     case whereis(Server) of
         undefined ->
@@ -175,22 +191,32 @@ handle(St = #client_st{server = Server, nick = OldNick}, {nick, NewNick}) ->
             end
     end;
 
-% ---------------------------------------------------------------------------
-% The cases below do not need to be changed...
-% But you should understand how they work!
-
-% Get current nick
+%---------------------------------------------------------------------
+% handle/2 - whoami
+%
+% Return the current nickname of the client.
+%---------------------------------------------------------------------
 handle(St, whoami) ->
-    {reply, St#client_st.nick, St} ;
+    {reply, St#client_st.nick, St};
 
-% Incoming message (from channel, to GUI)
+%---------------------------------------------------------------------
+% handle/2 - {message_receive, Channel, Nick, Msg}
+%
+% Handle incoming messages from a channel.
+% - Forwards the message to the GUI process for display.
+%---------------------------------------------------------------------
 handle(St = #client_st{gui = GUI}, {message_receive, Channel, Nick, Msg}) ->
-    gen_server:call(GUI, {message_receive, Channel, Nick++"> "++Msg}),
-    {reply, ok, St} ;
+    gen_server:call(GUI, {message_receive, Channel, Nick ++ "> " ++ Msg}),
+    {reply, ok, St};
 
-% Quit client via GUI
+%---------------------------------------------------------------------
+% handle/2 - quit
+%
+% Handle client quit request from the GUI.
+% - Sends leave requests for all joined channels.
+% - Clears joined_channels in the client state.
+%---------------------------------------------------------------------
 handle(St = #client_st{server = Server, client_id = Client_Id, joined_channels = Joined_Channels}, quit) ->
-    % Leave all joined channels
     lists:foreach(
         fun(Channel) ->
             catch genserver:request(Server, {leave, Client_Id, Channel})
@@ -199,6 +225,11 @@ handle(St = #client_st{server = Server, client_id = Client_Id, joined_channels =
     ),
     {reply, ok, St#client_st{joined_channels = #{}}};
 
-% Catch-all for any unhandled requests
+%---------------------------------------------------------------------
+% handle/2 - Unknown
+%
+% Catch-all for unhandled requests.
+% - Returns an error tuple indicating the request is not implemented.
+%---------------------------------------------------------------------
 handle(St, _) ->
-    {reply, {error, not_implemented, "Client does not handle this command"}, St} .
+    {reply, {error, not_implemented, "Client does not handle this command"}, St}.
