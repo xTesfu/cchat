@@ -225,14 +225,10 @@ channel_handler(State, {message_send, Nick, Msg, SenderId}) ->
     case maps:is_key(SenderId, Users) of
         true ->
             ChanName = maps:get("name", State),
-            maps:foreach(
-                fun(Id, P) ->
-                    if Id =/= SenderId ->
-                        send_message(ChanName, Nick, Msg, P);
-                       true -> ok
-                    end
-                end,
-                Users),
+            % Collect all PIDs except the sender
+            Pids = [P || {Id, P} <- maps:to_list(Users), Id =/= SenderId],
+            % Spawn a separate process to handle the broadcast
+            spawn(fun() -> broadcast(Pids, ChanName, Nick, Msg) end),
             {reply, ok, State};
         false ->
             {reply, user_not_joined, State}
@@ -249,6 +245,23 @@ channel_handler(State, _) ->
 %%====================================================================
 %% Messaging Utilities
 %%====================================================================
+
+%---------------------------------------------------------------------
+% broadcast/4
+%
+% Broadcast a message to all clients in a channel.
+% - Spawns a process per client to send the message concurrently.
+% - Uses send_message/4 for actual delivery.
+%---------------------------------------------------------------------
+broadcast([], _Chan, _Nick, _Msg) ->
+    ok;
+broadcast(Pids, Chan, Nick, Msg) ->
+    lists:foreach(
+        fun(Pid) ->
+            spawn(fun() -> send_message(Chan, Nick, Msg, Pid) end)
+        end,
+        Pids
+    ).
 
 %---------------------------------------------------------------------
 % send_message/4

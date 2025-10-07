@@ -62,7 +62,6 @@ send_message(Channel, Nick, Msg, Pid) ->
 **Explanation:**
 
 * Sends the message to a single PID.
-* Keeps the original message format intact.
 
 ---
 
